@@ -1,0 +1,411 @@
+import { useState, useEffect } from "react";
+
+const SESSION_TYPES = {
+  run: { label: "Run", emoji: "🏃", color: "#FF5733", light: "#FF573322" },
+  gym: { label: "Gym", emoji: "🏋️", color: "#00C896", light: "#00C89622" },
+  rest: { label: "Rest", emoji: "💤", color: "#7B8FA1", light: "#7B8FA122" },
+};
+
+const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+
+function getMonthDays(year, month) {
+  const firstDay = new Date(year, month, 1).getDay();
+  const offset = firstDay === 0 ? 6 : firstDay - 1;
+  const total = new Date(year, month + 1, 0).getDate();
+  return { offset, total };
+}
+
+function storageKey(year, month) {
+  return `training_${year}_${month}`;
+}
+
+const MODALS = { none: null };
+
+export default function TrainingCalendar() {
+  const today = new Date();
+  const [current, setCurrent] = useState({ year: today.getFullYear(), month: today.getMonth() });
+  const [sessions, setSessions] = useState({});
+  const [modal, setModal] = useState(null); // { day, existing }
+  const [form, setForm] = useState({ type: "run", notes: "", distance: "", duration: "" });
+  const [view, setView] = useState("month"); // month | stats
+
+  const key = storageKey(current.year, current.month);
+
+  useEffect(() => {
+    const saved = localStorage.getItem(key);
+    if (saved) setSessions(JSON.parse(saved));
+    else setSessions({});
+  }, [key]);
+
+  function saveSessions(next) {
+    setSessions(next);
+    localStorage.setItem(key, JSON.stringify(next));
+  }
+
+  function openDay(day) {
+    const existing = sessions[day];
+    setForm(existing || { type: "run", notes: "", distance: "", duration: "" });
+    setModal({ day, existing });
+  }
+
+  function saveSession() {
+    const next = { ...sessions, [modal.day]: { ...form } };
+    saveSessions(next);
+    setModal(null);
+  }
+
+  function deleteSession() {
+    const next = { ...sessions };
+    delete next[modal.day];
+    saveSessions(next);
+    setModal(null);
+  }
+
+  function prevMonth() {
+    setCurrent(c => {
+      if (c.month === 0) return { year: c.year - 1, month: 11 };
+      return { year: c.year, month: c.month - 1 };
+    });
+  }
+
+  function nextMonth() {
+    setCurrent(c => {
+      if (c.month === 11) return { year: c.year + 1, month: 0 };
+      return { year: c.year, month: c.month + 1 };
+    });
+  }
+
+  const { offset, total } = getMonthDays(current.year, current.month);
+
+  // Stats
+  const counts = { run: 0, gym: 0, rest: 0 };
+  let totalDist = 0, totalDur = 0;
+  Object.values(sessions).forEach(s => {
+    if (s && s.type) counts[s.type] = (counts[s.type] || 0) + 1;
+    if (s?.distance) totalDist += parseFloat(s.distance) || 0;
+    if (s?.duration) totalDur += parseFloat(s.duration) || 0;
+  });
+  const activeDays = counts.run + counts.gym;
+
+  const isToday = (day) =>
+    day === today.getDate() && current.month === today.getMonth() && current.year === today.getFullYear();
+
+  return (
+    <div style={styles.root}>
+      {/* BG grain */}
+      <div style={styles.grain} />
+
+      {/* Header */}
+      <header style={styles.header}>
+        <div style={styles.logo}>
+          <span style={styles.logoIcon}>◈</span>
+          <span style={styles.logoText}>TRAINLOG</span>
+        </div>
+        <div style={styles.tabs}>
+          {["month","stats"].map(v => (
+            <button key={v} onClick={() => setView(v)} style={{...styles.tab, ...(view===v ? styles.tabActive : {})}}>
+              {v.toUpperCase()}
+            </button>
+          ))}
+        </div>
+      </header>
+
+      {view === "month" ? (
+        <div style={styles.calWrap}>
+          {/* Month nav */}
+          <div style={styles.monthNav}>
+            <button style={styles.navBtn} onClick={prevMonth}>‹</button>
+            <div style={styles.monthTitle}>
+              <span style={styles.monthName}>{MONTHS[current.month]}</span>
+              <span style={styles.yearLabel}>{current.year}</span>
+            </div>
+            <button style={styles.navBtn} onClick={nextMonth}>›</button>
+          </div>
+
+          {/* Day labels */}
+          <div style={styles.dayLabels}>
+            {DAYS.map(d => <div key={d} style={styles.dayLabel}>{d}</div>)}
+          </div>
+
+          {/* Grid */}
+          <div style={styles.grid}>
+            {Array.from({ length: offset }).map((_, i) => <div key={`e${i}`} style={styles.emptyCell} />)}
+            {Array.from({ length: total }).map((_, i) => {
+              const day = i + 1;
+              const session = sessions[day];
+              const type = session?.type;
+              const st = type ? SESSION_TYPES[type] : null;
+              const todayCell = isToday(day);
+              return (
+                <div
+                  key={day}
+                  onClick={() => openDay(day)}
+                  style={{
+                    ...styles.cell,
+                    ...(todayCell ? styles.todayCell : {}),
+                    ...(type ? { background: st.light, borderColor: st.color + "55" } : {}),
+                  }}
+                >
+                  <span style={{...styles.dayNum, ...(todayCell ? styles.todayNum : {})}}>
+                    {day}
+                  </span>
+                  {session && (
+                    <div style={styles.sessionTag}>
+                      <span style={styles.sessionEmoji}>{st.emoji}</span>
+                      {session.distance && <span style={{...styles.sessionMeta, color: st.color}}>{session.distance}km</span>}
+                      {session.duration && !session.distance && <span style={{...styles.sessionMeta, color: st.color}}>{session.duration}m</span>}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Mini legend */}
+          <div style={styles.legend}>
+            {Object.entries(SESSION_TYPES).map(([k, v]) => (
+              <div key={k} style={styles.legendItem}>
+                <span style={{...styles.legendDot, background: v.color}} />
+                <span style={styles.legendLabel}>{v.emoji} {v.label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : (
+        /* Stats view */
+        <div style={styles.statsWrap}>
+          <div style={styles.statsHeader}>{MONTHS[current.month]} Stats</div>
+          <div style={styles.statsGrid}>
+            <StatCard label="Active Days" value={activeDays} unit="days" color="#FF5733" />
+            <StatCard label="Runs" value={counts.run} unit="sessions" color="#FF5733" />
+            <StatCard label="Gym" value={counts.gym} unit="sessions" color="#00C896" />
+            <StatCard label="Rest Days" value={counts.rest} unit="days" color="#7B8FA1" />
+            <StatCard label="Total Distance" value={totalDist.toFixed(1)} unit="km" color="#FF5733" />
+            <StatCard label="Total Duration" value={Math.round(totalDur)} unit="min" color="#00C896" />
+          </div>
+          <div style={styles.streakWrap}>
+            <div style={styles.streakLabel}>Monthly Progress</div>
+            <div style={styles.progressBar}>
+              <div style={{...styles.progressFill, width: `${Math.min(100, (activeDays/total)*100)}%`}} />
+            </div>
+            <div style={styles.streakSub}>{activeDays} of {total} days logged</div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal */}
+      {modal && (
+        <div style={styles.overlay} onClick={() => setModal(null)}>
+          <div style={styles.modalBox} onClick={e => e.stopPropagation()}>
+            <div style={styles.modalHeader}>
+              <span style={styles.modalTitle}>
+                {MONTHS[current.month]} {modal.day}
+              </span>
+              <button style={styles.closeBtn} onClick={() => setModal(null)}>✕</button>
+            </div>
+
+            {/* Type selector */}
+            <div style={styles.typeRow}>
+              {Object.entries(SESSION_TYPES).map(([k, v]) => (
+                <button
+                  key={k}
+                  onClick={() => setForm(f => ({ ...f, type: k }))}
+                  style={{
+                    ...styles.typeBtn,
+                    ...(form.type === k ? { background: v.color, color: "#fff", borderColor: v.color } : {}),
+                  }}
+                >
+                  {v.emoji} {v.label}
+                </button>
+              ))}
+            </div>
+
+            {form.type !== "rest" && (
+              <div style={styles.fieldRow}>
+                <div style={styles.field}>
+                  <label style={styles.fieldLabel}>
+                    {form.type === "run" ? "Distance (km)" : "Duration (min)"}
+                  </label>
+                  <input
+                    style={styles.input}
+                    type="number"
+                    placeholder={form.type === "run" ? "e.g. 5.2" : "e.g. 60"}
+                    value={form.type === "run" ? form.distance : form.duration}
+                    onChange={e => setForm(f => form.type === "run"
+                      ? { ...f, distance: e.target.value }
+                      : { ...f, duration: e.target.value }
+                    )}
+                  />
+                </div>
+                <div style={styles.field}>
+                  <label style={styles.fieldLabel}>Duration (min)</label>
+                  <input
+                    style={styles.input}
+                    type="number"
+                    placeholder="e.g. 45"
+                    value={form.duration}
+                    onChange={e => setForm(f => ({ ...f, duration: e.target.value }))}
+                  />
+                </div>
+              </div>
+            )}
+
+            <div style={styles.field}>
+              <label style={styles.fieldLabel}>Notes</label>
+              <textarea
+                style={styles.textarea}
+                placeholder="How did it feel? What did you do?"
+                value={form.notes}
+                onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
+              />
+            </div>
+
+            <div style={styles.modalActions}>
+              {modal.existing && (
+                <button style={styles.deleteBtn} onClick={deleteSession}>Delete</button>
+              )}
+              <button style={styles.saveBtn} onClick={saveSession}>Save</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StatCard({ label, value, unit, color }) {
+  return (
+    <div style={styles.statCard}>
+      <div style={{ ...styles.statValue, color }}>{value}</div>
+      <div style={styles.statUnit}>{unit}</div>
+      <div style={styles.statLabel}>{label}</div>
+    </div>
+  );
+}
+
+const styles = {
+  root: {
+    minHeight: "100vh",
+    background: "#0D0F12",
+    color: "#E8E8E8",
+    fontFamily: "'DM Mono', 'Fira Mono', 'Courier New', monospace",
+    position: "relative",
+    overflow: "hidden",
+  },
+  grain: {
+    position: "fixed", inset: 0, pointerEvents: "none", zIndex: 0,
+    backgroundImage: "url(\"data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E\")",
+    backgroundSize: "200px",
+  },
+  header: {
+    position: "relative", zIndex: 10,
+    display: "flex", justifyContent: "space-between", alignItems: "center",
+    padding: "20px 24px 0",
+  },
+  logo: { display: "flex", alignItems: "center", gap: 10 },
+  logoIcon: { color: "#FF5733", fontSize: 22, letterSpacing: -2 },
+  logoText: { fontSize: 13, fontWeight: 700, letterSpacing: 6, color: "#fff" },
+  tabs: { display: "flex", gap: 4, background: "#161A1F", borderRadius: 8, padding: 4 },
+  tab: {
+    background: "none", border: "none", color: "#7B8FA1",
+    fontSize: 10, letterSpacing: 3, padding: "6px 12px", cursor: "pointer",
+    borderRadius: 6, fontFamily: "inherit", transition: "all 0.15s",
+  },
+  tabActive: { background: "#1E242C", color: "#fff" },
+
+  // Calendar
+  calWrap: { position: "relative", zIndex: 5, padding: "16px 20px 24px" },
+  monthNav: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 },
+  navBtn: {
+    background: "#1E242C", border: "none", color: "#fff", fontSize: 22,
+    width: 36, height: 36, borderRadius: 8, cursor: "pointer",
+    display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "inherit",
+  },
+  monthTitle: { display: "flex", flexDirection: "column", alignItems: "center" },
+  monthName: { fontSize: 22, fontWeight: 700, letterSpacing: 1, color: "#fff" },
+  yearLabel: { fontSize: 11, color: "#7B8FA1", letterSpacing: 3, marginTop: 2 },
+  dayLabels: { display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4, marginBottom: 6 },
+  dayLabel: { textAlign: "center", fontSize: 9, letterSpacing: 2, color: "#7B8FA1", padding: "4px 0" },
+  grid: { display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4 },
+  emptyCell: { minHeight: 66, borderRadius: 8 },
+  cell: {
+    minHeight: 66, borderRadius: 8, background: "#161A1F",
+    border: "1px solid #1E242C", cursor: "pointer",
+    padding: "8px 6px", display: "flex", flexDirection: "column", gap: 4,
+    transition: "all 0.15s", position: "relative",
+  },
+  todayCell: { borderColor: "#FF573366" },
+  dayNum: { fontSize: 11, fontWeight: 600, color: "#7B8FA1", lineHeight: 1 },
+  todayNum: { color: "#FF5733" },
+  sessionTag: { display: "flex", flexDirection: "column", gap: 2, marginTop: 2 },
+  sessionEmoji: { fontSize: 14, lineHeight: 1 },
+  sessionMeta: { fontSize: 9, fontWeight: 700, letterSpacing: 0.5 },
+  legend: { display: "flex", gap: 16, marginTop: 16, justifyContent: "center" },
+  legendItem: { display: "flex", alignItems: "center", gap: 6 },
+  legendDot: { width: 8, height: 8, borderRadius: "50%" },
+  legendLabel: { fontSize: 10, color: "#7B8FA1", letterSpacing: 1 },
+
+  // Stats
+  statsWrap: { position: "relative", zIndex: 5, padding: "24px 20px" },
+  statsHeader: { fontSize: 18, fontWeight: 700, letterSpacing: 2, color: "#fff", marginBottom: 20 },
+  statsGrid: { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginBottom: 24 },
+  statCard: {
+    background: "#161A1F", borderRadius: 12, padding: "16px 12px",
+    display: "flex", flexDirection: "column", alignItems: "center", gap: 2,
+    border: "1px solid #1E242C",
+  },
+  statValue: { fontSize: 28, fontWeight: 700, lineHeight: 1 },
+  statUnit: { fontSize: 9, color: "#7B8FA1", letterSpacing: 2, marginBottom: 4 },
+  statLabel: { fontSize: 9, color: "#7B8FA1", letterSpacing: 1, textAlign: "center" },
+  streakWrap: { background: "#161A1F", borderRadius: 12, padding: 20, border: "1px solid #1E242C" },
+  streakLabel: { fontSize: 11, letterSpacing: 3, color: "#7B8FA1", marginBottom: 12 },
+  progressBar: { background: "#0D0F12", borderRadius: 4, height: 6, overflow: "hidden", marginBottom: 8 },
+  progressFill: { height: "100%", background: "linear-gradient(90deg, #FF5733, #FF8C33)", borderRadius: 4, transition: "width 0.6s ease" },
+  streakSub: { fontSize: 10, color: "#7B8FA1", letterSpacing: 1 },
+
+  // Modal
+  overlay: {
+    position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 100,
+    display: "flex", alignItems: "flex-end", justifyContent: "center",
+    backdropFilter: "blur(4px)",
+  },
+  modalBox: {
+    background: "#161A1F", borderRadius: "20px 20px 0 0",
+    width: "100%", maxWidth: 480, padding: 24,
+    border: "1px solid #1E242C", borderBottom: "none",
+  },
+  modalHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 },
+  modalTitle: { fontSize: 16, fontWeight: 700, letterSpacing: 2, color: "#fff" },
+  closeBtn: { background: "#0D0F12", border: "none", color: "#7B8FA1", width: 28, height: 28, borderRadius: 6, cursor: "pointer", fontSize: 12, fontFamily: "inherit" },
+  typeRow: { display: "flex", gap: 8, marginBottom: 20 },
+  typeBtn: {
+    flex: 1, background: "#0D0F12", border: "1px solid #1E242C",
+    color: "#7B8FA1", fontSize: 11, letterSpacing: 1, padding: "10px 4px",
+    borderRadius: 8, cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s",
+  },
+  fieldRow: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 12 },
+  field: { display: "flex", flexDirection: "column", gap: 6, marginBottom: 12 },
+  fieldLabel: { fontSize: 9, letterSpacing: 3, color: "#7B8FA1" },
+  input: {
+    background: "#0D0F12", border: "1px solid #1E242C", borderRadius: 8,
+    color: "#fff", padding: "10px 12px", fontSize: 13, fontFamily: "inherit",
+    outline: "none",
+  },
+  textarea: {
+    background: "#0D0F12", border: "1px solid #1E242C", borderRadius: 8,
+    color: "#fff", padding: "10px 12px", fontSize: 12, fontFamily: "inherit",
+    outline: "none", minHeight: 72, resize: "vertical",
+  },
+  modalActions: { display: "flex", gap: 10, marginTop: 20 },
+  saveBtn: {
+    flex: 1, background: "#FF5733", border: "none", color: "#fff",
+    padding: "12px", borderRadius: 10, fontSize: 12, letterSpacing: 2,
+    cursor: "pointer", fontWeight: 700, fontFamily: "inherit",
+  },
+  deleteBtn: {
+    background: "#0D0F12", border: "1px solid #FF573344", color: "#FF5733",
+    padding: "12px 16px", borderRadius: 10, fontSize: 12, letterSpacing: 1,
+    cursor: "pointer", fontFamily: "inherit",
+  },
+};
